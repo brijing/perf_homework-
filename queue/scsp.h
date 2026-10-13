@@ -1,10 +1,12 @@
 #include <algorithm>
+#include <cassert>
+#include <cstddef>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <vector>
 
-#define MAX_SIZE (1 << 23)
+#define MAX_SIZE (1 << 26)
 #define MIN_MSG_SIZE (1 << 11)
 #define METADATA_SIZE (MAX_SIZE / MIN_MSG_SIZE)
 
@@ -19,11 +21,13 @@ struct ScspQueue {
   int write(const char *newel, size_t sz);
   int read(char *input_buffer);
 
+  info metadata[METADATA_SIZE];
+
 private:
   char *data;
-  info metadata[METADATA_SIZE];
   size_t write_idx = 0;
-  size_t read_idx = -1;
+  size_t read_idx = 0;
+  bool firstime = 0;
 };
 
 // smalles message is 2 kb => 2 * 11 bytes => 2 ^ 23 / 2 ^ 11 = 2 ^ 12
@@ -38,22 +42,23 @@ ScspQueue::ScspQueue() { // i want to hold at least 8 2mb messages = 8 * 2 * 2 ^
 }
 
 int ScspQueue::write(const char *newel, size_t sz) {
+
+  assert(sz <= 2 * 1024 * 1024);
   size_t acc_write_idx = (write_idx) % METADATA_SIZE;
   size_t acc_read_idx = read_idx % METADATA_SIZE;
 
   bool is_new_meta_loop =
-      (write_idx / METADATA_SIZE) > (read_idx / METADATA_SIZE);
+      firstime ? false
+               : (write_idx / METADATA_SIZE) > (read_idx / METADATA_SIZE);
 
   if (is_new_meta_loop && (acc_write_idx == acc_read_idx)) // we would override
   {
-
-    std::cout << write_idx << " " << read_idx << " WRITING FAILED\n";
     return 0;
   }
   // we can write the metadata here (we know for sure we can keeep the data
   // here)
 
-  int start_idx;
+  size_t start_idx;
   int loopy;
   if (write_idx == 0) {
     loopy = 0;
@@ -66,17 +71,16 @@ int ScspQueue::write(const char *newel, size_t sz) {
     start_idx = metadata[acc_write_idx - 1].offset;
   }
 
-  int offset = start_idx + sz;
+  size_t offset = start_idx + sz;
   if (offset >= MAX_SIZE) {
-    std::cout << "BUFFER TOO BIG ?\n"; // TODO i would get stuck ehre
     start_idx = 0;
     offset = sz;
     loopy++;
   }
 
-  int max_idx;
+  size_t max_idx;
 
-  if (read_idx == -1 || (metadata[acc_read_idx].loop == loopy)) {
+  if (firstime || (metadata[acc_read_idx].loop == loopy)) {
     max_idx = MAX_SIZE;
   } else {
     max_idx = metadata[acc_read_idx].offset;
@@ -92,42 +96,48 @@ int ScspQueue::write(const char *newel, size_t sz) {
   memcpy(data + start_idx, newel, sz);
 
   write_idx++;
-  std::cout << "writing " << newel[3] << "\n";
   return 1;
 }
 
 // we will assume the buffer is big enough
 int ScspQueue::read(char *input_buffer) {
 
+  size_t tbr = firstime ? 0 : read_idx + 1;
   // write_idx is the next available spot to write (NOT WRITTEN YET)
   // read_idx is the last thing we read
-
-  // If what im abbout to read is not written yet
-  if ((read_idx + 1) > (write_idx - 1)) {
-    std::cout << "NOTHING YET\n";
+  if (tbr > (write_idx - 1)) {
     return 0; // nothing to read yet
   }
 
-  read_idx++;
+  read_idx = tbr;
 
   size_t past_read_idx = (read_idx - 1) % METADATA_SIZE;
   size_t acc_read_idx = read_idx % METADATA_SIZE;
 
-  int size;
-  int start;
+  size_t size;
+  size_t start;
   if (read_idx == 0) {
     start = 0;
     size = metadata[0].offset;
   } else {
     start = metadata[past_read_idx].offset;
-    size = metadata[acc_read_idx].offset - metadata[past_read_idx].offset;
-  }
 
+    if (metadata[acc_read_idx].loop >
+        metadata[past_read_idx].loop) // if we go around, we know for sure that
+                                      // this is the first element in our buffer
+      size = metadata[acc_read_idx].offset;
+    else
+      size = metadata[acc_read_idx].offset - metadata[past_read_idx].offset;
+  }
+  if (size > 2 * 1024 * 1024) {
+    std::cout << read_idx << " " << past_read_idx << " " << acc_read_idx << size
+              << "\n";
+  }
+  assert(size <= 2 * 1024 * 1024);
   memcpy(input_buffer, data + start, size);
   // we want to read this data, so we need to memcpy x
   // 32 bytes -> 32
-
-  read_idx++;
+  firstime = false;
   std::cout << "read\n";
   return 1;
 }
@@ -143,15 +153,9 @@ int main() {
 
   srand(time(0));
 
-  char *buf = (char *)malloc(2 * 1024 * 1024);
+  char *buf = (char *)malloc(2 * 1024 * 1024 + 1);
 
   // 2097152 | 4194304 |
-  //  queue.write(p_max, 2 * 1024 * 1024);
-  //  queue.write(p_max, 2 * 1024 * 1024);
-  //  queue.read(buf);
-  //  queue.write(p_max, 2 * 1024 * 1024);
-
-  //  return 0;
   int indx = 0;
   for (int i = 0; i < 200; i++) {
     if (rand() % 2) // WRITE
