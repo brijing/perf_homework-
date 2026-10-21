@@ -27,7 +27,7 @@ private:
   char *data;
   size_t write_idx = 0;
   size_t read_idx = 0;
-  bool firstime = 0;
+  bool firstime = 1;
 };
 
 // smalles message is 2 kb => 2 * 11 bytes => 2 ^ 23 / 2 ^ 11 = 2 ^ 12
