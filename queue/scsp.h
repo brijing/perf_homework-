@@ -1,9 +1,11 @@
 #include <algorithm>
+#include <benchmark/benchmark.h>
 #include <cassert>
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <mutex>
 #include <vector>
 
 #define MAX_SIZE (1 << 26)
@@ -23,16 +25,18 @@ struct ScspQueue {
 
   info metadata[METADATA_SIZE];
 
+  std::mutex m;
+
 private:
   char *data;
   size_t write_idx = 0;
   size_t read_idx = 0;
-  bool firstime = 0;
+  bool firstime = 1;
 };
 
-// smalles message is 2 kb => 2 * 11 bytes => 2 ^ 23 / 2 ^ 11 = 2 ^ 12
+// smallest message is 2 kb => 2 * 11 bytes => 2 ^ 23 / 2 ^ 11 = 2 ^ 12
 ScspQueue::ScspQueue() { // i want to hold at least 8 2mb messages = 8 * 2 * 2 ^
-                         // 10 kb = 2 ^ 4 * 2^ 10 kb = 2 ^ 4 * 2 ^ 20 bytes;j
+                         // 10 kb = 2 ^ 4 * 2^ 10 kb = 2 ^ 4 * 2 ^ 20 bytes
 
   data = (char *)malloc(MAX_SIZE);
 
@@ -106,6 +110,7 @@ int ScspQueue::read(char *input_buffer) {
   // write_idx is the next available spot to write (NOT WRITTEN YET)
   // read_idx is the last thing we read
   if (tbr > (write_idx - 1)) {
+    std::cout << "daaa " << tbr << " " << write_idx << "\n";
     return 0; // nothing to read yet
   }
 
@@ -142,49 +147,69 @@ int ScspQueue::read(char *input_buffer) {
   return 1;
 }
 
-int main() {
-  ScspQueue queue;
+ScspQueue *queue;
+// Define another benchmark
+static void BM_StringCopy(benchmark::State &state) {
 
   std::string max_str(2 * 1024 * 1024, 'b'); // 2 MB of 'A'
   char *p_max = max_str.data();
 
-  std::string min_str(2 * 1024, 's'); // 2 KB of "B"
+  std::string min_str(2 * 1024, 's');
+  ; // 2 KB of "B"
   char *p_min = min_str.data();
 
   srand(time(0));
-
   char *buf = (char *)malloc(2 * 1024 * 1024 + 1);
 
-  // 2097152 | 4194304 |
-  int indx = 0;
-  for (int i = 0; i < 200; i++) {
-    if (rand() % 2) // WRITE
-    {
+  if (state.thread_index() == 0) {
+    queue = new ScspQueue;
+    srand(time(0));
+  }
+  for (auto _ : state) {
 
-      char *chosen_p;
-      size_t sz;
+    // 2097152 | 4194304 |
+    int indx = 0;
+    int last_read = -1;
+    for (int i = 0; i < 200; i++) {
+      if (state.thread_index() == 0) // WRITE
+      {
+        std::lock_guard<std::mutex> lock(queue->m);
+        char *chosen_p;
+        size_t sz;
 
-      if (rand() % 2) {
-        chosen_p = p_min;
-        sz = 2 * 1024;
+        if (rand() % 2) {
+          chosen_p = p_min;
+          sz = 2 * 1024;
+        } else {
+          chosen_p = p_max;
+          sz = 2 * 1024 * 1024;
+        }
+        chosen_p[0] = '0' + indx / 10;
+        chosen_p[1] = '0' + indx % 10;
+        if (!queue->write(chosen_p, sz)) {
+
+          continue;
+        }
+        indx++;
       } else {
-        chosen_p = p_max;
-        sz = 2 * 1024 * 1024;
-      }
-      chosen_p[0] = '0' + indx / 10;
-      chosen_p[1] = '0' + indx % 10;
-      if (!queue.write(chosen_p, sz)) {
+        // READ
+        std::lock_guard<std::mutex> lock(queue->m);
 
-        continue;
+        if (!queue->read(buf)) {
+          std::cout << "WRITE EMPTY\n";
+          continue;
+        }
+
+        int expected = last_read + 1;
+        //        assert(buf[0] == ('0' + expected / 10));
+        //        assert(buf[1] == ('0' + expected % 10));
+        last_read = expected;
+        std::cout << buf[0] << buf[1] << buf[3] << "\n";
       }
-      indx++;
-    } else {
-      // READ
-      if (!queue.read(buf)) {
-        std::cout << "WRITE EMPTY\n";
-        continue;
-      }
-      std::cout << buf[0] << buf[1] << buf[3] << "\n";
     }
   }
 }
+
+BENCHMARK(BM_StringCopy)->Threads(2)->Iterations(1);
+
+BENCHMARK_MAIN();
