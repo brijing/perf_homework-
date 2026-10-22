@@ -50,7 +50,16 @@ int ScspQueue::write(const char *newel, size_t sz) {
   std::lock_guard<std::mutex> lock(m);
   assert(sz <= 2 * 1024 * 1024);
   size_t acc_write_idx = (write_idx) % METADATA_SIZE;
-  size_t acc_read_idx = read_idx % METADATA_SIZE;
+
+  size_t safe_read_idx;
+  bool safe_first_time;
+  {
+    std::lock_guard<std::mutex> lock(m);
+    safe_read_idx = 0;
+    safe_first_time = firstime;
+  }
+
+  size_t acc_read_idx = safe_read_idx % METADATA_SIZE;
 
   if (write_idx > (read_idx + 100))
     return 0;
