@@ -54,7 +54,7 @@ int ScspQueue::write(const char *newel, size_t sz) {
   size_t safe_read_idx;
   bool safe_first_time;
   {
-    safe_read_idx = 0;
+    safe_read_idx = read_idx;
     safe_first_time = firstime;
   }
 
@@ -131,11 +131,12 @@ int ScspQueue::read(char *input_buffer) {
   // write_idx is the next available spot to write (NOT WRITTEN YET)
   // read_idx is the last thing we read
   if (firstime && safe_write_idx == 0) {
+    //  std::cout << "DA!\n";
     return 0; // nothing to read yet
   }
 
   if (tbr > (safe_write_idx - 1)) {
-
+    //    std::cout << "NU";
     return 0; // nothing to read yet
   }
 
@@ -205,7 +206,7 @@ static void BM_StringCopy(benchmark::State &state) {
     // 2097152 | 4194304 |
     int indx = 0;
     int last_read = -1;
-    for (int i = 0; i < 9999; i++) {
+    for (int i = 0; i < 400; i++) {
       if (state.thread_index() == 0) // WRITE
       {
         char *chosen_p;
@@ -222,21 +223,21 @@ static void BM_StringCopy(benchmark::State &state) {
         chosen_p[0] = '0' + (indx / 100) % 10;
         chosen_p[1] = '0' + (indx / 10) % 10;
         chosen_p[2] = '0' + indx % 10;
-        if (!queue->write(chosen_p, sz)) {
-          continue;
+        while (!queue->write(chosen_p, sz)) {
+          // continue;
         }
         //     std::cout << "write!" << "  " << indx << " \n";
         indx++;
       } else {
         // READ
 
-        if (!queue->read(buf)) {
-          continue;
-          //          std::cout << "WRITE EMPTY\n";
+        while (!queue->read(buf)) {
+          // continue;
+          //           std::cout << "WRITE EMPTY\n";
         }
 
-        std::cout << last_read << "\n";
-        //        std::cout << "da: " << buf[0] << buf[1] << buf[2] << "\n";
+        //        std::cout << "HELLO " << last_read << "\n";
+        std::cout << "da: " << buf[0] << buf[1] << buf[2] << "\n";
         int expected = last_read + 1;
         assert(buf[0] == ('0' + (expected / 100) % 10));
         assert(buf[1] == ('0' + (expected / 10) % 10));
