@@ -29,9 +29,9 @@ struct ScspQueue {
 
 private:
   char *data;
-  std::atomic<size_t> write_idx = 0;
-  std::atomic<size_t> read_idx = 0;
-  std::atomic<bool> firstime = 1;
+  size_t write_idx = 0;
+  size_t read_idx = 0;
+  bool firstime = 1;
 };
 
 // smallest message is 2 kb => 2 * 11 bytes => 2 ^ 23 / 2 ^ 11 = 2 ^ 12
@@ -50,19 +50,11 @@ int ScspQueue::write(const char *newel, size_t sz) {
   std::lock_guard<std::mutex> lock(m);
   assert(sz <= 2 * 1024 * 1024);
   size_t acc_write_idx = (write_idx) % METADATA_SIZE;
+  size_t acc_read_idx = read_idx % METADATA_SIZE;
 
-  size_t safe_read_idx;
-  bool safe_first_time;
-  {
-    safe_read_idx = read_idx;
-    safe_first_time = firstime;
-  }
-
-  size_t acc_read_idx = safe_read_idx % METADATA_SIZE;
-
-  bool is_new_meta_loop = safe_first_time ? false
-                                          : (write_idx / METADATA_SIZE) >
-                                                (read_idx / METADATA_SIZE);
+  bool is_new_meta_loop =
+      firstime ? false
+               : (write_idx / METADATA_SIZE) > (read_idx / METADATA_SIZE);
 
   if (is_new_meta_loop && (acc_write_idx == acc_read_idx)) // we would override
   {
@@ -92,14 +84,16 @@ int ScspQueue::write(const char *newel, size_t sz) {
     start_idx = 0;
     offset = sz;
     loopy++;
+    //    std::cout << "Trying to loop loop. isfirstime: " << firstime << " \n";
   }
 
   size_t max_idx;
 
-  if (safe_first_time) {
+  if (firstime) {
     if (loopy == 0) // we cant wrap around if we still havent read  yet
       max_idx = MAX_SIZE;
     else {
+      //      std::cout << "CANT LOOP\n";
       return 0;
     }
   } else {
@@ -110,6 +104,7 @@ int ScspQueue::write(const char *newel, size_t sz) {
   }
 
   if (offset >= max_idx) {
+    //   std::cout << offset << " " << max_idx << " WRITING NO SPACE\n";
     return 0;
   }
   // std::cout << "WRITING FROM " << start_idx << " to " << start_idx + sz
@@ -125,25 +120,23 @@ int ScspQueue::write(const char *newel, size_t sz) {
 // we will assume the buffer is big enough
 int ScspQueue::read(char *input_buffer) {
 
-  size_t safe_write_idx = write_idx;
-
+  std::lock_guard<std::mutex> lock(m);
   size_t tbr = firstime ? 0 : read_idx + 1;
   // write_idx is the next available spot to write (NOT WRITTEN YET)
   // read_idx is the last thing we read
-  if (firstime && safe_write_idx == 0) {
-    //  std::cout << "DA!\n";
+  if (firstime && write_idx == 0) {
     return 0; // nothing to read yet
   }
 
-  if (tbr > (safe_write_idx - 1)) {
-    //    std::cout << "NU";
+  if (tbr > (write_idx - 1)) {
+
     return 0; // nothing to read yet
   }
 
   read_idx = tbr;
 
-  size_t past_read_idx = (tbr - 1) % METADATA_SIZE;
-  size_t acc_read_idx = tbr % METADATA_SIZE;
+  size_t past_read_idx = (read_idx - 1) % METADATA_SIZE;
+  size_t acc_read_idx = read_idx % METADATA_SIZE;
 
   size_t size;
   size_t start;
@@ -172,14 +165,15 @@ int ScspQueue::read(char *input_buffer) {
               << " MAX_SIZE=" << MAX_SIZE << " read_idx=" << read_idx
               << " past_read_idx=" << past_read_idx
               << " acc_read_idx=" << acc_read_idx << "\n";
-    std::abort();
+    //    std::abort();
   }
   assert(size <= 2 * 1024 * 1024);
+  // std::cout << "READING from " << start << " size: " << size << "\n";
   memcpy(input_buffer, data + start, size);
   // we want to read this data, so we need to memcpy x
   // 32 bytes -> 32
   firstime = false;
-  read_idx = tbr;
+  // std::cout << "read\n";
   return 1;
 }
 
@@ -224,7 +218,7 @@ static void BM_StringCopy(benchmark::State &state) {
         chosen_p[1] = '0' + (indx / 10) % 10;
         chosen_p[2] = '0' + indx % 10;
         while (!queue->write(chosen_p, sz)) {
-          // continue;
+          //  continue;
         }
         //     std::cout << "write!" << "  " << indx << " \n";
         indx++;
@@ -233,10 +227,10 @@ static void BM_StringCopy(benchmark::State &state) {
 
         while (!queue->read(buf)) {
           // continue;
-          //           std::cout << "WRITE EMPTY\n";
+          //          std::cout << "WRITE EMPTY\n";
         }
 
-        //        std::cout << "HELLO " << last_read << "\n";
+        //        std::cout << last_read << "\n";
         //        std::cout << "da: " << buf[0] << buf[1] << buf[2] << "\n";
         int expected = last_read + 1;
         assert(buf[0] == ('0' + (expected / 100) % 10));
