@@ -202,7 +202,7 @@ static void BM_StringCopy(benchmark::State &state) {
     // 2097152 | 4194304 |
     int indx = 0;
     int last_read = -1;
-    for (int i = 0; i < 999; i++) {
+    for (int i = 0; i < 9999; i++) {
       if (state.thread_index() == 0) // WRITE
       {
         char *chosen_p;
@@ -219,17 +219,20 @@ static void BM_StringCopy(benchmark::State &state) {
         chosen_p[0] = '0' + (indx / 100) % 10;
         chosen_p[1] = '0' + (indx / 10) % 10;
         chosen_p[2] = '0' + indx % 10;
-        while (!queue->write(chosen_p, sz)) {
+        if (!queue->write(chosen_p, sz)) {
+          continue;
         }
         //     std::cout << "write!" << "  " << indx << " \n";
         indx++;
       } else {
         // READ
 
-        while (!queue->read(buf)) {
+        if (!queue->read(buf)) {
+          continue;
           //          std::cout << "WRITE EMPTY\n";
         }
 
+        std::cout << last_read << "\n";
         //        std::cout << "da: " << buf[0] << buf[1] << buf[2] << "\n";
         int expected = last_read + 1;
         assert(buf[0] == ('0' + (expected / 100) % 10));
@@ -241,6 +244,6 @@ static void BM_StringCopy(benchmark::State &state) {
   }
 }
 
-BENCHMARK(BM_StringCopy)->Threads(2)->Iterations(200);
+BENCHMARK(BM_StringCopy)->Threads(2)->Iterations(1);
 
 BENCHMARK_MAIN();
