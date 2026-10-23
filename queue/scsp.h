@@ -182,14 +182,7 @@ int ScspQueue::read(char *input_buffer)
       size = metadata[acc_read_idx].offset - metadata[past_read_idx].offset;
   }
   if (size > 2 * 1024 * 1024 || start >= MAX_SIZE || start + size > MAX_SIZE)
-  {
-    std::cerr << "ERROR READ: start=" << start << " size=" << size
-              << " MAX_SIZE=" << MAX_SIZE << " read_idx=" << read_info.read_idx
-              << " past_read_idx=" << past_read_idx
-              << " acc_read_idx=" << acc_read_idx << "\n";
-    std::abort();
-  }
-  assert(size <= 2 * 1024 * 1024);
+    assert(size <= 2 * 1024 * 1024);
   // std::cout << "READING from " << start << " size: " << size << "\n";
   memcpy(input_buffer, data + start, size);
   read_idx_info next{tbr, false};
